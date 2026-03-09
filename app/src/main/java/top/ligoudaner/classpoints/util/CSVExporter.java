@@ -55,10 +55,15 @@ public class CSVExporter {
                 row[1] = String.valueOf(s.weeklyBasePoints);
 
                 Map<String, Map<String, Double>> pointsMap = new HashMap<>();
+                Map<String, Map<String, List<String>>> detailsMap = new HashMap<>();
                 for (PointRecord r : records) {
                     String day = DateUtils.getDayOfWeekName(r.timestamp);
                     pointsMap.computeIfAbsent(r.category, k -> new HashMap<>())
                              .merge(day, r.points, Double::sum);
+
+                    detailsMap.computeIfAbsent(r.category, k -> new HashMap<>())
+                            .computeIfAbsent(day, k -> new ArrayList<>())
+                            .add(r.subCategory + (r.points > 0 ? "+" : "") + r.points);
                 }
 
                 String[] categories = {"纪律", "学习", "安全", "劳动", "文明礼仪", "两操"};
@@ -67,9 +72,26 @@ public class CSVExporter {
                 int currentIdx = 2;
                 for (String cat : categories) {
                     Map<String, Double> categoryDayPoints = pointsMap.getOrDefault(cat, new HashMap<>());
+                    Map<String, List<String>> categoryDayDetails = detailsMap.getOrDefault(cat, new HashMap<>());
                     for (String day : dayNames) {
-                        Double p = categoryDayPoints.get(day);
-                        row[currentIdx++] = p != null ? String.valueOf(p) : "";
+                        Double p = categoryDayPoints != null ? categoryDayPoints.get(day) : null;
+                        List<String> details = categoryDayDetails != null ? categoryDayDetails.get(day) : null;
+                        if (p != null) {
+                            StringBuilder cellValue = new StringBuilder(String.valueOf(p));
+                            if (details != null && !details.isEmpty()) {
+                                cellValue.append(" (");
+                                for (int i = 0; i < details.size(); i++) {
+                                    cellValue.append(details.get(i));
+                                    if (i < details.size() - 1) {
+                                        cellValue.append(", ");
+                                    }
+                                }
+                                cellValue.append(")");
+                            }
+                            row[currentIdx++] = cellValue.toString();
+                        } else {
+                            row[currentIdx++] = "";
+                        }
                     }
                 }
 
@@ -78,7 +100,13 @@ public class CSVExporter {
                 for (String day : dayNames) {
                     double dayChange = 0;
                     for (String cat : categories) {
-                        dayChange += pointsMap.getOrDefault(cat, new HashMap<>()).getOrDefault(day, 0.0);
+                        Map<String, Double> dayMap = pointsMap.get(cat);
+                        if (dayMap != null) {
+                            Double pts = dayMap.get(day);
+                            if (pts != null) {
+                                dayChange += pts;
+                            }
+                        }
                     }
                     dailyRunningTotal += dayChange;
                     row[currentIdx++] = String.valueOf(dailyRunningTotal);
