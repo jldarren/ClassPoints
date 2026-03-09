@@ -16,7 +16,10 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 
 import java.io.File;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import top.ligoudaner.classpoints.databinding.ActivityMainBinding;
@@ -29,6 +32,7 @@ import top.ligoudaner.classpoints.ui.StudentDetailActivity;
 import top.ligoudaner.classpoints.util.CSVExporter;
 import top.ligoudaner.classpoints.util.DateUtils;
 import top.ligoudaner.classpoints.util.RuleManager;
+import top.ligoudaner.classpoints.util.SyncServer;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -37,6 +41,7 @@ public class MainActivity extends AppCompatActivity {
     private StudentAdapter adapter;
     private SharedPreferences prefs;
     private int sortMode = 0; // 0: By ID, 1: By Weekly, 2: By Cumulative
+    private SyncServer syncServer;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -54,6 +59,28 @@ public class MainActivity extends AppCompatActivity {
         setupRecyclerView();
         setupButtons();
         refreshList();
+
+        // 默认开启同步服务器
+        startSyncServer();
+    }
+
+    private void startSyncServer() {
+        try {
+            if (syncServer == null) {
+                syncServer = new SyncServer(8080, db);
+                // 注册回调，当 Web 端有数据变更时通知 UI 刷新
+                syncServer.setOnDataChangeListener(() -> {
+                    runOnUiThread(this::refreshList);
+                });
+                syncServer.start();
+                String ip = getLocalIpAddress();
+                if (getSupportActionBar() != null) {
+                    getSupportActionBar().setSubtitle("本机服务器IP: " + ip);
+                }
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "启动同步服务失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
     }
 
     @Override
@@ -113,6 +140,34 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, toastText, Toast.LENGTH_SHORT).show();
         });
         binding.btnExport.setOnClickListener(v -> exportCSV());
+        binding.btnSync.setText("同步");
+        binding.btnSync.setOnClickListener(v -> {
+            refreshList();
+            Toast.makeText(this, "列表已刷新并同步", Toast.LENGTH_SHORT).show();
+        });
+    }
+
+    private void toggleSyncServer() {
+        // 此方法已弃用，功能已移入 startSyncServer
+    }
+
+    private String getLocalIpAddress() {
+        try {
+            List<NetworkInterface> interfaces = Collections.list(NetworkInterface.getNetworkInterfaces());
+            for (NetworkInterface intf : interfaces) {
+                List<InetAddress> addrs = Collections.list(intf.getInetAddresses());
+                for (InetAddress addr : addrs) {
+                    if (!addr.isLoopbackAddress()) {
+                        String sAddr = addr.getHostAddress();
+                        boolean isIPv4 = sAddr.indexOf(':') < 0;
+                        if (isIPv4) return sAddr;
+                    }
+                }
+            }
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
+        return "127.0.0.1";
     }
 
     private void updateSortButtonText() {
@@ -193,6 +248,8 @@ public class MainActivity extends AppCompatActivity {
 
         refreshList();
         Toast.makeText(this, "由于 " + rule.description + "，" + student.name + " " + (rule.score >= 0 ? "+" : "") + rule.score + "分", Toast.LENGTH_SHORT).show();
+
+        // Android 侧数据变化，Web 侧通常通过下一次请求同步，这里 refreshList 已更新 UI
     }
 
     private void exportCSV() {
@@ -228,12 +285,22 @@ public class MainActivity extends AppCompatActivity {
                 .setMessage("作者: 李狗蛋儿\n" +
                         "版本: 1.0\n\n" +
                         "使用指南:\n" +
-                        "1. 点击'初始化班级'设定学生人数。\n" +
-                        "2. 点击学生条目右侧的'+'号选择加/扣分项。\n" +
-                        "3. 长按学生条目查看其分数的详细趋势图和分布图。\n" +
-                        "4. 点击排序按钮可以在学号、本周总分、累积总分之间切换排序方式。\n" +
-                        "5. 积分每周一会自动重置，并在结转时计算累积总分。")
+                        "1. 初始化：点击'初始化班级'设定学生人数。\n" +
+                        "2. 评分：点击学生条目右侧'+'号选择加/扣分项。网页版也可实时评分。\n" +
+                        "3. 详情：长按学生条目（或网页版点击详情）查看分数分布与趋势图。\n" +
+                        "4. 排序：点击排序按钮切换学号、本周、累积总分排序。双端操作均会自动触发重新排序。\n" +
+                        "5. 同步：App 启动后自动开启同步服务，IP 显示在标题栏下方。网页端接入 IP 即可管理。\n" +
+                        "6. 实时性：取消轮询，改为数据变动触发同步，双端实时响应并自动刷新排序。")
                 .setPositiveButton("确定", null)
                 .show();
     }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (syncServer != null) {
+            syncServer.stop();
+        }
+    }
 }
+

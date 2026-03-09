@@ -32,3 +32,6 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Web Portal local cache (DO NOT COMMIT)
+web-portal/public/cp_cached_*

@@ -1,0 +1,13 @@
+{
+  "name": "class-points-web",
+  "version": "1.0.0",
+  "description": "Web portal for ClassPoints Android app",
+  "main": "index.js",
+  "scripts": {
+    "start": "serve public",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "serve": "^14.2.1"
+  }
+}

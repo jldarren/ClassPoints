@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClassPoints Web 版</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background-color: #f5f5f5; color: #333; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        h1 { color: #6200ee; text-align: center; margin-bottom: 30px; }
+        .sync-status { margin-bottom: 20px; padding: 12px; border-radius: 6px; font-weight: bold; text-align: center; }
+        .status-idle { background: #eee; }
+        .status-syncing { background: #bbdefb; color: #1976d2; }
+        .status-success { background: #c8e6c9; color: #2e7d32; }
+        .status-error { background: #ffcdd2; color: #c62828; }
+        .controls { margin-bottom: 25px; display: flex; gap: 10px; align-items: center; justify-content: center; background: #f0f0f0; padding: 15px; border-radius: 8px; }
+        button { padding: 10px 18px; background: #6200ee; color: white; border: none; border-radius: 6px; cursor: pointer; transition: 0.2s; font-weight: bold; }
+        button:hover { background: #3700b3; }
+        button:disabled { background: #bdbdbd; cursor: not-allowed; }
+        input { padding: 10px; width: 220px; border: 1px solid #ccc; border-radius: 6px; }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #eee; padding: 12px; text-align: left; }
+        th { background-color: #6200ee; color: white; cursor: pointer; user-select: none; }
+        th:hover { background-color: #3700b3; }
+        tr:hover { background-color: #f1f1f1; }
+
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); overflow-y: auto; }
+        .modal-content { background-color: white; margin: 5% auto; padding: 25px; border-radius: 12px; width: 80%; max-width: 800px; position: relative; }
+        .close { position: absolute; right: 20px; top: 15px; font-size: 28px; font-weight: bold; cursor: pointer; }
+
+        .rule-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin-top: 20px; }
+        .rule-item { border: 1px solid #ddd; padding: 12px; border-radius: 8px; cursor: pointer; transition: 0.2s; }
+        .rule-item:hover { border-color: #6200ee; background-color: #f3e5f5; }
+        .rule-item h4 { margin: 0 0 5px 0; font-size: 14px; }
+        .rule-item span { font-weight: bold; color: #e91e63; }
+        .rule-item span.plus { color: #4caf50; }
+
+        .tabs { display: flex; gap: 5px; margin-bottom: 15px; border-bottom: 2px solid #eee; }
+        .tab { padding: 8px 15px; cursor: pointer; border-radius: 6px 6px 0 0; }
+        .tab.active { background: #6200ee; color: white; }
+
+        .charts-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+        canvas { width: 100% !important; height: 300px !important; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ClassPoints Web 管理端</h1>
+
+        <div class="controls">
+            <label for="deviceIp">Android 设备 IP:</label>
+            <input type="text" id="deviceIp" placeholder="例如: 192.168.124.13">
+            <button id="syncBtn">手动同步</button>
+        </div>
+
+        <div id="status" class="sync-status status-idle">
+            等待同步... (自动同步每 60 秒触发一次)
+        </div>
+
+        <div id="data-container">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3>学生列表</h3>
+                <span id="updateTime" style="font-size: 12px; color: #666;">上次更新: -</span>
+            </div>
+            <table id="studentTable">
+                <thead>
+                    <tr>
+                        <th onclick="sortTable(0)">学号 ↑↓</th>
+                        <th onclick="sortTable(1)">姓名</th>
+                        <th onclick="sortTable(2)">本周总分 ↑↓</th>
+                        <th onclick="sortTable(3)">累积总分 ↑↓</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- 数据将通过 JS 填充 -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 评分/图表 弹窗 -->
+    <div id="detailModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <h2 id="modalStudentTitle">学生信息</h2>
+
+            <div class="tabs">
+                <div class="tab active" id="tabHeadScore" onclick="showTab('score')">积分评定</div>
+                <div class="tab" id="tabHeadChart" onclick="showTab('chart')">统计图表</div>
+            </div>
+
+            <div id="tab-score">
+                <div id="categoryTabs" class="tabs" style="font-size: 14px;"></div>
+                <div id="ruleGrid" class="rule-grid"></div>
+            </div>
+
+            <div id="tab-chart" style="display: none;">
+                <div class="charts-container">
+                    <div>
+                        <h4 style="text-align: center;">积分分布 (条目数)</h4>
+                        <canvas id="pieChart"></canvas>
+                    </div>
+                    <div>
+                        <h4 style="text-align: center;">分数趋势 (折线图)</h4>
+                        <canvas id="lineChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="../src/sync.js"></script>
+    <script>
+        let currentStudents = [];
+        let allRules = {};
+        let currentStudentId = null;
+        let pieChart = null;
+        let lineChart = null;
+
+        const ipInput = document.getElementById('deviceIp');
+        const syncBtn = document.getElementById('syncBtn');
+        const statusDiv = document.getElementById('status');
+        const updateTimeSpan = document.getElementById('updateTime');
+
+        // 从本地获取保存的 IP
+        ipInput.value = localStorage.getItem('lastDeviceIp') || '';
+
+        // 初始化加载缓存
+        const cachedStudents = localStorage.getItem('cp_cached_students');
+        if (cachedStudents) {
+            currentStudents = JSON.parse(cachedStudents);
+            updateUI();
+        }
+        const cachedRules = localStorage.getItem('cp_cached_rules');
+        if (cachedRules) allRules = JSON.parse(cachedRules);
+
+        syncBtn.addEventListener('click', () => performSync());
+
+        // 取消自动同步，改为手动触发或操作后自动触发
+        // setInterval(() => performSync(true), 60000);
+
+        async function performSync(isAuto = false) {
+            let inputVal = ipInput.value.trim();
+            if (!inputVal) {
+                if (!isAuto) alert('请输入 Android 设备的 IP 地址');
+                return;
+            }
+
+            localStorage.setItem('lastDeviceIp', inputVal);
+
+            // 自动补齐端口
+            const ipPort = inputVal.includes(':') ? inputVal : inputVal + ':8080';
+
+            if (!isAuto) {
+                statusDiv.textContent = '正在同步数据...';
+                statusDiv.className = 'sync-status status-syncing';
+                syncBtn.disabled = true;
+            }
+
+            try {
+                // 1. 同步学生数据
+                const data = await ClassPointsSync.syncData(ipPort);
+                currentStudents = data.students;
+                localStorage.setItem('cp_cached_students', JSON.stringify(currentStudents));
+                updateUI();
+
+                // 2. 预加载评分规则
+                allRules = await ClassPointsSync.getRules(ipPort);
+                localStorage.setItem('cp_cached_rules', JSON.stringify(allRules));
+
+                statusDiv.textContent = '同步成功! 最后同步时间: ' + new Date().toLocaleTimeString();
+                statusDiv.className = 'sync-status status-success';
+                updateTimeSpan.textContent = '上次更新: ' + new Date().toLocaleTimeString();
+            } catch (err) {
+                console.error(err);
+                statusDiv.textContent = '同步失败: ' + err.message;
+                statusDiv.className = 'sync-status status-error';
+            } finally {
+                syncBtn.disabled = false;
+            }
+        }
+
+        function updateUI() {
+            const tbody = document.querySelector('#studentTable tbody');
+            tbody.innerHTML = '';
+            currentStudents.forEach(s => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${s.id}</td>
+                    <td>${s.name}</td>
+                    <td>${s.currentWeeklyPoints}</td>
+                    <td>${s.totalPoints}</td>
+                    <td>
+                        <button onclick="openDetail(${s.id})">评分/详情</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        let sortDirs = [1, 1, 1, 1];
+        function sortTable(colIdx) {
+            sortDirs[colIdx] *= -1;
+            const dir = sortDirs[colIdx];
+
+            currentStudents.sort((a, b) => {
+                let valA, valB;
+                switch(colIdx) {
+                    case 0: valA = a.id; valB = b.id; break;
+                    case 1: valA = a.name; valB = b.name; break;
+                    case 2: valA = a.currentWeeklyPoints; valB = b.currentWeeklyPoints; break;
+                    case 3: valA = a.totalPoints; valB = b.totalPoints; break;
+                }
+                if (valA < valB) return -1 * dir;
+                if (valA > valB) return 1 * dir;
+                return 0;
+            });
+            updateUI();
+        }
+
+        function openDetail(studentId) {
+            currentStudentId = studentId;
+            const student = currentStudents.find(s => s.id === studentId);
+            document.getElementById('modalStudentTitle').textContent = `${student.name} (学号: ${student.id}) 的详细信息`;
+            document.getElementById('detailModal').style.display = 'block';
+
+            renderRuleCategories();
+            showTab('score');
+        }
+
+        function renderRuleCategories() {
+            const catsDiv = document.getElementById('categoryTabs');
+            catsDiv.innerHTML = '';
+            const categories = Object.keys(allRules);
+            categories.forEach((cat, idx) => {
+                const tab = document.createElement('div');
+                tab.className = 'tab' + (idx === 0 ? ' active' : '');
+                tab.textContent = cat;
+                tab.onclick = () => {
+                   document.querySelectorAll('#categoryTabs .tab').forEach(t => t.classList.remove('active'));
+                   tab.classList.add('active');
+                   renderRules(cat);
+                };
+                catsDiv.appendChild(tab);
+            });
+            if (categories.length > 0) renderRules(categories[0]);
+        }
+
+        function renderRules(category) {
+            const grid = document.getElementById('ruleGrid');
+            grid.innerHTML = '';
+            const rules = allRules[category] || [];
+            rules.forEach(rule => {
+                const div = document.createElement('div');
+                div.className = 'rule-item';
+                div.innerHTML = `
+                    <h4>${rule.description}</h4>
+                    <span class="${rule.score >= 0 ? 'plus' : ''}">${rule.score >= 0 ? '+' : ''}${rule.score}</span>
+                `;
+                div.onclick = () => applyRule(rule);
+                grid.appendChild(div);
+            });
+        }
+
+        async function applyRule(rule) {
+            if (!confirm(`确定要为学生评价: ${rule.description} (${rule.score}分) 吗?`)) return;
+
+            const ip = ipInput.value.trim();
+            const ipPort = ip.includes(':') ? ip : ip + ':8080';
+            try {
+                await ClassPointsSync.applyRule(ipPort, currentStudentId, rule);
+                // 评分成功后，立即同步一次数据以更新本地显示
+                await performSync(true);
+                alert('评分成功！');
+            } catch (err) {
+                alert('评分失败: ' + err.message);
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('detailModal').style.display = 'none';
+        }
+
+        function showTab(tabName) {
+            document.getElementById('tabHeadScore').className = 'tab' + (tabName === 'score' ? ' active' : '');
+            document.getElementById('tabHeadChart').className = 'tab' + (tabName === 'chart' ? ' active' : '');
+
+            document.getElementById('tab-score').style.display = tabName === 'score' ? 'block' : 'none';
+            document.getElementById('tab-chart').style.display = tabName === 'chart' ? 'block' : 'none';
+
+            if (tabName === 'chart') renderCharts();
+        }
+
+        async function renderCharts() {
+            const ip = ipInput.value.trim();
+            const ipPort = ip.includes(':') ? ip : ip + ':8080';
+            const records = await ClassPointsSync.getStudentDetails(ipPort, currentStudentId);
+
+            const catMap = {};
+            records.forEach(r => {
+                catMap[r.category] = (catMap[r.category] || 0) + 1;
+            });
+
+            if (pieChart) pieChart.destroy();
+            pieChart = new Chart(document.getElementById('pieChart'), {
+                type: 'pie',
+                data: {
+                    labels: Object.keys(catMap),
+                    datasets: [{
+                        data: Object.values(catMap),
+                        backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40']
+                    }]
+                }
+            });
+
+            const dayMap = {"一": 0, "二": 0, "三": 0, "四": 0, "五": 0};
+            const dayLabels = ["一", "二", "三", "四", "五"];
+
+            records.forEach(r => {
+                const date = new Date(r.timestamp);
+                let dayIdx = date.getDay();
+                if (dayIdx >= 1 && dayIdx <= 5) {
+                    dayMap[dayLabels[dayIdx-1]] += r.points;
+                }
+            });
+
+            let runningTotal = 100;
+            const trendData = [];
+            const d = new Date().getDay();
+            const maxDay = d === 0 ? 5 : Math.min(d, 5);
+
+            for(let i=0; i<maxDay; i++) {
+                runningTotal += dayMap[dayLabels[i]];
+                trendData.push(runningTotal);
+            }
+
+            if (lineChart) lineChart.destroy();
+            lineChart = new Chart(document.getElementById('lineChart'), {
+                type: 'line',
+                data: {
+                    labels: dayLabels.slice(0, maxDay),
+                    datasets: [{
+                        label: '分数趋势',
+                        data: trendData,
+                        borderColor: '#6200ee',
+                        fill: false,
+                        tension: 0.1
+                    }]
+                }
+            });
+        }
+    </script>
+</body>
+</html>
