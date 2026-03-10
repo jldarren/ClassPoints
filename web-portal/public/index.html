@@ -53,6 +53,7 @@
             <label for="deviceIp">Android 设备 IP:</label>
             <input type="text" id="deviceIp" placeholder="例如: 192.168.124.13">
             <button id="syncBtn">手动同步</button>
+            <button id="exportBtn" style="background: #018786;">导出 CSV</button>
         </div>
 
         <div id="status" class="sync-status status-idle">
@@ -121,6 +122,7 @@
 
         const ipInput = document.getElementById('deviceIp');
         const syncBtn = document.getElementById('syncBtn');
+        const exportBtn = document.getElementById('exportBtn');
         const statusDiv = document.getElementById('status');
 
         // 从本地获取保存的 IP
@@ -141,6 +143,7 @@
         }
 
         syncBtn.addEventListener('click', () => performSync());
+        exportBtn.addEventListener('click', () => exportToCSV());
 
         // 检测用户活动自动触发同步
         let lastSyncTime = 0;
@@ -212,6 +215,112 @@
                 }
             } finally {
                 if (!isAuto) syncBtn.disabled = false;
+            }
+        }
+
+        async function exportToCSV() {
+            if (currentStudents.length === 0) {
+                alert("请先同步数据后再导出");
+                return;
+            }
+
+            const ip = ipInput.value.trim();
+            if (!ip) {
+                alert("请输入 Android 设备 IP");
+                return;
+            }
+            const ipPort = ip.includes(':') ? ip : ip + ':8080';
+
+            statusDiv.textContent = '正在拉取详情并准备导出...';
+            statusDiv.className = 'sync-status status-syncing';
+            exportBtn.disabled = true;
+
+            try {
+                const dayLabels = ["一", "二", "三", "四", "五"];
+                const categories = ["纪律", "学习", "安全", "劳动", "文明礼仪", "两操"];
+
+                // 1. 构建 CSV 头部
+                let csv = "\uFEFF"; // UTF-8 BOM，确保 Excel 打开不乱码
+                csv += `"我为人人，人人为我 —— 班级管理考核量化表"\n\n`;
+
+                // 表格结构头
+                let rowHeader = "姓名,基础分,";
+                categories.forEach(cat => rowHeader += `${cat},,,,`);
+                rowHeader += "每星期总分,,,,大总分\n";
+                csv += rowHeader;
+
+                let rowDays = "日期,-,";
+                for(let i=0; i<7; i++) {
+                    dayLabels.forEach(day => rowDays += `${day},`);
+                }
+                rowDays += "本周累计\n";
+                csv += rowDays;
+
+                // 2. 遍历学生拉取详情
+                for (const s of currentStudents) {
+                    const records = await ClassPointsSync.getStudentDetails(ipPort, s.id);
+
+                    const pointsMap = {}; // 分类得分和详情映射
+                    records.forEach(r => {
+                        const date = new Date(r.timestamp);
+                        let dayNo = date.getDay();
+                        if (dayNo >= 1 && dayNo <= 5) {
+                            const dayName = dayLabels[dayNo-1];
+                            if(!pointsMap[r.category]) pointsMap[r.category] = {};
+                            if(!pointsMap[r.category][dayName]) pointsMap[r.category][dayName] = { score: 0, details: [] };
+
+                            pointsMap[r.category][dayName].score += r.points;
+                            pointsMap[r.category][dayName].details.push(`${r.subCategory}(${r.points > 0 ? '+' : ''}${r.points})`);
+                        }
+                    });
+
+                    let rowData = `"${s.name}(${s.id})",100,`;
+
+                    // 各分类得分格子
+                    categories.forEach(cat => {
+                        dayLabels.forEach(day => {
+                            const data = pointsMap[cat] && pointsMap[cat][day];
+                            if (data) {
+                                rowData += `"${data.score} (${data.details.join('; ')})",`;
+                            } else {
+                                rowData += ",";
+                            }
+                        });
+                    });
+
+                    // 计算每日得分趋势
+                    let runningTotal = 100;
+                    dayLabels.forEach(day => {
+                        let dayChange = 0;
+                        categories.forEach(cat => {
+                            if (pointsMap[cat] && pointsMap[cat][day]) dayChange += pointsMap[cat][day].score;
+                        });
+                        runningTotal += dayChange;
+                        rowData += `${runningTotal},`;
+                    });
+
+                    rowData += `${runningTotal}\n`;
+                    csv += rowData;
+                }
+
+                // 3. 触发下载
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                const url = URL.createObjectURL(blob);
+                link.setAttribute("href", url);
+                link.setAttribute("download", `ClassPoints_Web_Export_${new Date().toLocaleDateString()}.csv`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+                statusDiv.innerHTML = '导出成功！';
+                statusDiv.className = 'sync-status status-success';
+            } catch (err) {
+                console.error(err);
+                statusDiv.textContent = '导出失败: ' + err.message;
+                statusDiv.className = 'sync-status status-error';
+            } finally {
+                exportBtn.disabled = false;
             }
         }
 
