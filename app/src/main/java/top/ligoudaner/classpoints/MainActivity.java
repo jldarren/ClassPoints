@@ -170,11 +170,6 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, toastText, Toast.LENGTH_SHORT).show();
         });
         binding.btnExport.setOnClickListener(v -> exportCSV());
-        binding.btnSync.setText("同步");
-        binding.btnSync.setOnClickListener(v -> {
-            refreshList();
-            Toast.makeText(this, "列表已刷新并同步", Toast.LENGTH_SHORT).show();
-        });
     }
 
     private String getLocalIpAddress() {
@@ -330,4 +325,3 @@ public class MainActivity extends AppCompatActivity {
         // For teacher's convenience, let's keep it running unless manually stopped or app explicitly destroyed
     }
 }
-
