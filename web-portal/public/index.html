@@ -56,7 +56,7 @@
         </div>
 
         <div id="status" class="sync-status status-idle">
-            等待同步... (自动同步每 60 秒触发一次)
+            等待同步... (操作后将实时同步)
         </div>
 
         <div id="data-container">
@@ -136,6 +136,11 @@
         }
         const cachedRules = localStorage.getItem('cp_cached_rules');
         if (cachedRules) allRules = JSON.parse(cachedRules);
+
+        // 如果已经有 IP，页面加载后自动同步一次最新数据
+        if (ipInput.value.trim()) {
+            performSync(true);
+        }
 
         syncBtn.addEventListener('click', () => performSync());
 
