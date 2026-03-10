@@ -62,7 +62,6 @@
         <div id="data-container">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <h3>学生列表</h3>
-                <span id="updateTime" style="font-size: 12px; color: #666;">上次更新: -</span>
             </div>
             <table id="studentTable">
                 <thead>
@@ -123,7 +122,6 @@
         const ipInput = document.getElementById('deviceIp');
         const syncBtn = document.getElementById('syncBtn');
         const statusDiv = document.getElementById('status');
-        const updateTimeSpan = document.getElementById('updateTime');
 
         // 从本地获取保存的 IP
         ipInput.value = localStorage.getItem('lastDeviceIp') || '';
@@ -144,7 +142,35 @@
 
         syncBtn.addEventListener('click', () => performSync());
 
-        // 取消自动同步，改为手动触发或操作后自动触发
+        // 检测用户活动自动触发同步
+        let lastSyncTime = 0;
+        const SYNC_COOLDOWN = 5000; // 冷却时间缩短为 5 秒，更灵敏
+        let debounceTimer = null;
+
+        function handleUserActivity() {
+            const now = Date.now();
+            if (now - lastSyncTime < SYNC_COOLDOWN) return;
+
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                const nowAfterDebounce = Date.now();
+                if (nowAfterDebounce - lastSyncTime >= SYNC_COOLDOWN) {
+                    const inputVal = ipInput.value.trim();
+                    if (inputVal && document.visibilityState === 'visible') {
+                        console.log("检测到活跃，自动同步...");
+                        performSync(true);
+                        lastSyncTime = nowAfterDebounce;
+                    }
+                }
+            }, 350);
+        }
+
+        // 绑定在 window 上更可靠，涵盖全屏活动
+        window.addEventListener('mousemove', handleUserActivity);
+        window.addEventListener('click', handleUserActivity);
+        window.addEventListener('focus', () => performSync(true));
+
+        // 取消自动同步
         // setInterval(() => performSync(true), 60000);
 
         async function performSync(isAuto = false) {
@@ -156,7 +182,6 @@
 
             localStorage.setItem('lastDeviceIp', inputVal);
 
-            // 自动补齐端口
             const ipPort = inputVal.includes(':') ? inputVal : inputVal + ':8080';
 
             if (!isAuto) {
@@ -166,25 +191,27 @@
             }
 
             try {
-                // 1. 同步学生数据
                 const data = await ClassPointsSync.syncData(ipPort);
-                currentStudents = data.students;
-                localStorage.setItem('cp_cached_students', JSON.stringify(currentStudents));
-                updateUI();
+                if (data && data.students) {
+                    currentStudents = data.students;
+                    localStorage.setItem('cp_cached_students', JSON.stringify(currentStudents));
+                    updateUI();
 
-                // 2. 预加载评分规则
-                allRules = await ClassPointsSync.getRules(ipPort);
-                localStorage.setItem('cp_cached_rules', JSON.stringify(allRules));
+                    allRules = await ClassPointsSync.getRules(ipPort);
+                    localStorage.setItem('cp_cached_rules', JSON.stringify(allRules));
 
-                statusDiv.textContent = '同步成功! 最后同步时间: ' + new Date().toLocaleTimeString();
-                statusDiv.className = 'sync-status status-success';
-                updateTimeSpan.textContent = '上次更新: ' + new Date().toLocaleTimeString();
+                    statusDiv.innerHTML = '同步成功! 最后同步时间: ' + new Date().toLocaleTimeString();
+                    statusDiv.className = 'sync-status status-success';
+                    lastSyncTime = Date.now(); // 成功后更新冷却起点
+                }
             } catch (err) {
                 console.error(err);
-                statusDiv.textContent = '同步失败: ' + err.message;
-                statusDiv.className = 'sync-status status-error';
+                if (!isAuto) {
+                    statusDiv.textContent = '同步失败: ' + err.message;
+                    statusDiv.className = 'sync-status status-error';
+                }
             } finally {
-                syncBtn.disabled = false;
+                if (!isAuto) syncBtn.disabled = false;
             }
         }
 
