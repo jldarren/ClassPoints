@@ -1,8 +1,14 @@
 package top.ligoudaner.classpoints;
 
+import android.Manifest;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Menu;
@@ -13,6 +19,9 @@ import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
 
 import java.io.File;
@@ -32,7 +41,7 @@ import top.ligoudaner.classpoints.ui.StudentDetailActivity;
 import top.ligoudaner.classpoints.util.CSVExporter;
 import top.ligoudaner.classpoints.util.DateUtils;
 import top.ligoudaner.classpoints.util.RuleManager;
-import top.ligoudaner.classpoints.util.SyncServer;
+import top.ligoudaner.classpoints.util.SyncService;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -41,7 +50,15 @@ public class MainActivity extends AppCompatActivity {
     private StudentAdapter adapter;
     private SharedPreferences prefs;
     private int sortMode = 0; // 0: By ID, 1: By Weekly, 2: By Cumulative
-    private SyncServer syncServer;
+
+    private final BroadcastReceiver dataChangeReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (SyncService.ACTION_DATA_CHANGED.equals(intent.getAction())) {
+                refreshList();
+            }
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -60,26 +77,39 @@ public class MainActivity extends AppCompatActivity {
         setupButtons();
         refreshList();
 
-        // 默认开启同步服务器
-        startSyncServer();
+        // 检查通知权限 (Android 13+)
+        checkNotificationPermission();
+
+        // 启动后台同步服务
+        startSyncService();
+
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+                dataChangeReceiver, new IntentFilter(SyncService.ACTION_DATA_CHANGED));
     }
 
-    private void startSyncServer() {
-        try {
-            if (syncServer == null) {
-                syncServer = new SyncServer(8080, db);
-                // 注册回调，当 Web 端有数据变更时通知 UI 刷新
-                syncServer.setOnDataChangeListener(() -> {
-                    runOnUiThread(this::refreshList);
-                });
-                syncServer.start();
-                String ip = getLocalIpAddress();
-                if (getSupportActionBar() != null) {
-                    getSupportActionBar().setSubtitle("本机服务器IP: " + ip);
-                }
+    private void checkNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.POST_NOTIFICATIONS}, 101);
             }
-        } catch (Exception e) {
-            Toast.makeText(this, "启动同步服务失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void startSyncService() {
+        Intent serviceIntent = new Intent(this, SyncService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent);
+        } else {
+            startService(serviceIntent);
+        }
+
+        // 更新标题栏显示 IP
+        String ip = getLocalIpAddress();
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setTitle("班级积分通 (本机: " + android.os.Build.MODEL + ")");
+            getSupportActionBar().setSubtitle("本机服务器IP: " + ip);
         }
     }
 
@@ -145,10 +175,6 @@ public class MainActivity extends AppCompatActivity {
             refreshList();
             Toast.makeText(this, "列表已刷新并同步", Toast.LENGTH_SHORT).show();
         });
-    }
-
-    private void toggleSyncServer() {
-        // 此方法已弃用，功能已移入 startSyncServer
     }
 
     private String getLocalIpAddress() {
@@ -298,9 +324,10 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (syncServer != null) {
-            syncServer.stop();
-        }
+        LocalBroadcastManager.getInstance(this).unregisterReceiver(dataChangeReceiver);
+        // 通常不在这里停止服务，除非你想退出 App 时也停止同步
+        // Stop the service only if we are specifically closing the app
+        // For teacher's convenience, let's keep it running unless manually stopped or app explicitly destroyed
     }
 }
 
