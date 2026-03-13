@@ -283,7 +283,7 @@
                         dayLabels.forEach(day => {
                             const data = pointsMap[cat] && pointsMap[cat][day];
                             if (data) {
-                                rowData += `"${data.score} (${data.details.join('; ')})",`;
+                                rowData += `"${data.score} (${data.details.join(';\n')})",`;
                             } else {
                                 rowData += ",";
                             }

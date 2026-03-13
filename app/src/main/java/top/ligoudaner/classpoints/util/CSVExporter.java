@@ -83,7 +83,7 @@ public class CSVExporter {
                                 for (int i = 0; i < details.size(); i++) {
                                     cellValue.append(details.get(i));
                                     if (i < details.size() - 1) {
-                                        cellValue.append(", ");
+                                        cellValue.append(";\n");
                                     }
                                 }
                                 cellValue.append(")");
