@@ -26,7 +26,7 @@
         th:hover { background-color: #3700b3; }
         tr:hover { background-color: #f1f1f1; }
 
-        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); overflow-y: auto; }
+        .modal { display: none; position: fixed, z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); overflow-y: auto; }
         .modal-content { background-color: white; margin: 5% auto; padding: 25px; border-radius: 12px; width: 80%; max-width: 800px; position: relative; }
         .close { position: absolute; right: 20px; top: 15px; font-size: 28px; font-weight: bold; cursor: pointer; }
 
@@ -283,7 +283,7 @@
                         dayLabels.forEach(day => {
                             const data = pointsMap[cat] && pointsMap[cat][day];
                             if (data) {
-                                rowData += `"${data.score} (${data.details.join(';\n')})",`;
+                                rowData += `"${data.score};\n-------\n${data.details.join(';\n')}",`;
                             } else {
                                 rowData += ",";
                             }

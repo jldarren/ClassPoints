@@ -79,14 +79,13 @@ public class CSVExporter {
                         if (p != null) {
                             StringBuilder cellValue = new StringBuilder(String.valueOf(p));
                             if (details != null && !details.isEmpty()) {
-                                cellValue.append(" (");
+                                cellValue.append(";\n-------\n");
                                 for (int i = 0; i < details.size(); i++) {
                                     cellValue.append(details.get(i));
                                     if (i < details.size() - 1) {
                                         cellValue.append(";\n");
                                     }
                                 }
-                                cellValue.append(")");
                             }
                             row[currentIdx++] = cellValue.toString();
                         } else {
