@@ -5,4 +5,9 @@
         android:id="@+id/action_about"
         android:title="关于"
         app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_battery_optimization"
+        android:title="省电设置"
+        app:showAsAction="never" />
 </menu>

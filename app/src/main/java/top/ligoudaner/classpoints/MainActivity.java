@@ -8,8 +8,11 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.text.InputType;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -597,8 +600,48 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
         if (item.getItemId() == R.id.action_about) {
             showAboutDialog();
             return true;
+        } else if (item.getItemId() == R.id.action_battery_optimization) {
+            showBatteryOptimizationDialog();
+            return true;
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    private void showBatteryOptimizationDialog() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            String packageName = getPackageName();
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm != null && pm.isIgnoringBatteryOptimizations(packageName)) {
+                new AlertDialog.Builder(this)
+                        .setTitle("设置提示")
+                        .setMessage("已关闭系统基础电池优化。但在部分手机（如小米、OV、华为）上，仍需手动在【后台耗电管理】中设置为【允许后台高耗电】或【无限制】，应用才能在后台稳定运行。\n\n是否前往手动配置？")
+                        .setPositiveButton("前往设置", (dialog, which) -> {
+                            Intent intent = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+                            startActivity(intent);
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+            } else {
+                new AlertDialog.Builder(this)
+                        .setTitle("省电设置优化")
+                        .setMessage("为了确保 App 在后台或锁屏时能够持续提供同步服务和语音识别，建议您关闭对本应用的电池优化。")
+                        .setPositiveButton("一键优化", (dialog, which) -> {
+                            try {
+                                Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                                intent.setData(Uri.parse("package:" + packageName));
+                                startActivity(intent);
+                            } catch (Exception e) {
+                                // 某些国产 ROM 可能禁用了该 Intent
+                                Intent intent = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+                                startActivity(intent);
+                            }
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+            }
+        } else {
+            Toast.makeText(this, "当前系统版本无需配置电池优化", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void showAboutDialog() {

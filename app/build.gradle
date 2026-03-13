@@ -62,4 +62,8 @@ dependencies {
         exclude group: 'net.java.dev.jna', module: 'jna'
     }
     implementation 'net.java.dev.jna:jna:5.13.0@aar'
+
+    testImplementation libs.junit
+    androidTestImplementation libs.ext.junit
+    androidTestImplementation libs.espresso.core
 }
