@@ -39,6 +39,8 @@ public class RuleManager {
         addRule("学习", "上课不认真", -5);
         addRule("学习", "课堂任务没完成", -5);
         addRule("学习", "作业优秀", 5);
+        addRule("学习", "写字练习A+", 5);
+        addRule("学习", "写字练习A", 3);
         addRule("学习", "上课积极发言", 1);
         addRule("学习", "未按要求完成复习/预习/背诵", -2);
         addRule("学习", "提前完成复习/预习/背诵", 2);

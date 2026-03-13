@@ -20,6 +20,10 @@ android {
                 arguments += ["room.schemaLocation": "$projectDir/schemas".toString()]
             }
         }
+
+        ndk {
+            abiFilters "armeabi-v7a", "arm64-v8a"
+        }
     }
 
     buildFeatures {
@@ -54,4 +58,8 @@ dependencies {
     implementation libs.nanohttpd
     implementation "androidx.localbroadcastmanager:localbroadcastmanager:1.1.0"
     implementation "com.google.code.gson:gson:2.10.1"
+    implementation ('com.alphacephei:vosk-android:0.3.38') {
+        exclude group: 'net.java.dev.jna', module: 'jna'
+    }
+    implementation 'net.java.dev.jna:jna:5.13.0@aar'
 }

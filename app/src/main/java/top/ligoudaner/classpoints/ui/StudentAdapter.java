@@ -20,6 +20,7 @@ public class StudentAdapter extends RecyclerView.Adapter<StudentAdapter.ViewHold
     public interface OnStudentClickListener {
         void onAddPointClick(Student student);
         void onStudentLongClick(Student student);
+        void onStudentDoubleClick(Student student);
     }
 
     public void setOnStudentClickListener(OnStudentClickListener listener) {
@@ -52,6 +53,18 @@ public class StudentAdapter extends RecyclerView.Adapter<StudentAdapter.ViewHold
 
         holder.binding.btnAddPoint.setOnClickListener(v -> {
             if (listener != null) listener.onAddPointClick(student);
+        });
+
+        holder.itemView.setOnClickListener(new android.view.View.OnClickListener() {
+            private long lastClickTime = 0;
+            @Override
+            public void onClick(android.view.View v) {
+                long clickTime = System.currentTimeMillis();
+                if (clickTime - lastClickTime < 300) { // Double click interval
+                    if (listener != null) listener.onStudentDoubleClick(student);
+                }
+                lastClickTime = clickTime;
+            }
         });
 
         holder.itemView.setOnLongClickListener(v -> {

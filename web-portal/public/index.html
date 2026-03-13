@@ -270,7 +270,9 @@
                             if(!pointsMap[r.category][dayName]) pointsMap[r.category][dayName] = { score: 0, details: [] };
 
                             pointsMap[r.category][dayName].score += r.points;
-                            pointsMap[r.category][dayName].details.push(`${r.subCategory}(${r.points > 0 ? '+' : ''}${r.points})`);
+                            // 兼容性处理，如果 subCategory 不存在则尝试使用 description
+                            const detailName = r.subCategory || r.description || "未命名";
+                            pointsMap[r.category][dayName].details.push(`${detailName}(${r.points > 0 ? '+' : ''}${r.points})`);
                         }
                     });
 

@@ -24,7 +24,21 @@ import androidx.core.content.ContextCompat;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+import org.vosk.LibVosk;
+import org.vosk.LogLevel;
+import org.vosk.Model;
+import org.vosk.Recognizer;
+import org.vosk.android.RecognitionListener;
+import org.vosk.android.SpeechService;
+import org.vosk.android.StorageService;
+
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.util.ArrayList;
@@ -43,13 +57,20 @@ import top.ligoudaner.classpoints.util.DateUtils;
 import top.ligoudaner.classpoints.util.RuleManager;
 import top.ligoudaner.classpoints.util.SyncService;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements RecognitionListener {
 
     private ActivityMainBinding binding;
     private AppDatabase db;
     private StudentAdapter adapter;
     private SharedPreferences prefs;
     private int sortMode = 0; // 0: By ID, 1: By Weekly, 2: By Cumulative
+
+    private Model model;
+    private SpeechService speechService;
+    private Student voiceTargetStudent;
+
+    private AlertDialog voiceInputDialog;
+    private android.widget.TextView tvRealtimeText;
 
     private final BroadcastReceiver dataChangeReceiver = new BroadcastReceiver() {
         @Override
@@ -85,25 +106,73 @@ public class MainActivity extends AppCompatActivity {
 
         LocalBroadcastManager.getInstance(this).registerReceiver(
                 dataChangeReceiver, new IntentFilter(SyncService.ACTION_DATA_CHANGED));
+
+        initVosk();
+    }
+
+    private void initVosk() {
+        LibVosk.setLogLevel(LogLevel.INFO);
+        // 使用后台线程手动解压 assets，避免 UI 卡顿并绕过 uuid 校验
+        new Thread(() -> {
+            try {
+                File modelDir = new File(getFilesDir(), "vosk-model-cn");
+                // 如果关键文件不存在，则说明还没解压过，或者解压不完整
+                if (!new File(modelDir, "conf/model.conf").exists()) {
+                    runOnUiThread(() -> Toast.makeText(this, "首次运行，正在准备语音模型(约30秒)...", Toast.LENGTH_LONG).show());
+                    copyAssets("model-cn", modelDir);
+                }
+
+                // 直接从解压后的路径加载模型
+                this.model = new Model(modelDir.getAbsolutePath());
+                runOnUiThread(() -> Toast.makeText(this, "离线语音识别就绪", Toast.LENGTH_SHORT).show());
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    Toast.makeText(this, "模型加载失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    e.printStackTrace();
+                });
+            }
+        }).start();
+    }
+
+    /**
+     * 递归拷贝 assets 目录下的模型文件到 App 私有目录
+     */
+    private void copyAssets(String path, File outDir) throws IOException {
+        String[] assets = getAssets().list(path);
+        if (assets == null || assets.length == 0) {
+            // 是文件，执行拷贝
+            copyFile(path, outDir);
+        } else {
+            // 是目录，递归创建并拷贝
+            if (!outDir.exists()) outDir.mkdirs();
+            for (String asset : assets) {
+                copyAssets(path + "/" + asset, new File(outDir, asset));
+            }
+        }
+    }
+
+    private void copyFile(String assetPath, File outFile) throws IOException {
+        try (InputStream in = getAssets().open(assetPath);
+             OutputStream out = new FileOutputStream(outFile)) {
+            byte[] buffer = new byte[1024 * 8];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+        }
     }
 
     private void checkNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                    != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this,
-                        new String[]{Manifest.permission.POST_NOTIFICATIONS}, 101);
-            }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.POST_NOTIFICATIONS}, 101);
         }
     }
 
     private void startSyncService() {
         Intent serviceIntent = new Intent(this, SyncService.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent);
-        } else {
-            startService(serviceIntent);
-        }
+        startForegroundService(serviceIntent);
 
         // 更新标题栏显示 IP
         String ip = getLocalIpAddress();
@@ -133,6 +202,215 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void startVoiceInput(Student student) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.RECORD_AUDIO}, 102);
+            return;
+        }
+
+        if (model == null) {
+            Toast.makeText(this, "语音模型尚未就绪，请稍后", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (speechService != null) {
+            stopVoiceService();
+            return;
+        }
+
+        voiceTargetStudent = student;
+        showVoiceInputDialog(student);
+        try {
+            // ！！重点优化：构建一个极其细碎且覆盖面广的“短语词库”！！
+            java.util.Set<String> dynamicGrammar = new java.util.HashSet<>();
+            List<String> categories = RuleManager.getCategories();
+
+            for (String cat : categories) {
+                for (Rule rule : RuleManager.getRulesByCategory(cat)) {
+                    // 只保留中文字符和特殊的 A, +, - 进行识别匹配
+                    String cleanDesc = rule.description.replaceAll("[^\\u4e00-\\u9fa5A\\+\\-]", "");
+                    if (cleanDesc.length() < 1) continue;
+
+                    // 1. 加入完整描述 (如 "作业优秀", "写字练习A+")
+                    dynamicGrammar.add(cleanDesc);
+
+                    // 2. 自动切词：注入所有 2 字和 3 字的子片段，极大提高片段识别率
+                    // 比如 "上课不认真" 会被拆出 "上课"、"不认真"、"认真"
+                    for (int i = 0; i < cleanDesc.length() - 1; i++) {
+                        dynamicGrammar.add(cleanDesc.substring(i, i + 2)); // 2字词
+                        if (i < cleanDesc.length() - 2) {
+                            dynamicGrammar.add(cleanDesc.substring(i, i + 3)); // 3字词
+                        }
+                    }
+                }
+            }
+
+            // 3. 补充常用的口语化指令词
+            String[] helpers = {"迟到", "旷课", "打架", "没做", "没交", "发言", "垃圾", "吵架", "顶撞"};
+            for (String h : helpers) dynamicGrammar.add(h);
+
+            // 构建符合 Vosk 格式的 JSON 词表
+            StringBuilder grammarJson = new StringBuilder("[");
+            boolean first = true;
+            for (String phrase : dynamicGrammar) {
+                if (!first) grammarJson.append(",");
+                grammarJson.append("\"").append(phrase).append("\"");
+                first = false;
+            }
+            grammarJson.append("]"); // 移除 [unk]，强迫它在这些词里找最像的
+
+            Recognizer recognizer = new Recognizer(model, 16000.0f, grammarJson.toString());
+            speechService = new SpeechService(recognizer, 16000.0f);
+            speechService.startListening(this);
+
+            android.util.Log.d("VoskSpeech", "词法表已注入 " + dynamicGrammar.size() + " 个候选短词");
+        } catch (IOException e) {
+            if (voiceInputDialog != null) voiceInputDialog.dismiss();
+            Toast.makeText(this, "识别器启动失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void showVoiceInputDialog(Student student) {
+        androidx.appcompat.app.AlertDialog.Builder builder = new androidx.appcompat.app.AlertDialog.Builder(this);
+        android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
+        layout.setOrientation(android.widget.LinearLayout.VERTICAL);
+        layout.setPadding(60, 40, 60, 20);
+
+        android.widget.TextView tvTitle = new android.widget.TextView(this);
+        tvTitle.setText("正在为 " + student.name + " 评分...");
+        tvTitle.setTextSize(18);
+        tvTitle.setTextColor(android.graphics.Color.parseColor("#FF6200EE"));
+        tvTitle.setPadding(0, 0, 0, 30);
+        layout.addView(tvTitle);
+
+        tvRealtimeText = new android.widget.TextView(this);
+        tvRealtimeText.setText("倾听中...请说出加分项");
+        tvRealtimeText.setHint("例如：作业优秀");
+        tvRealtimeText.setTextSize(20);
+        tvRealtimeText.setTypeface(null, android.graphics.Typeface.BOLD);
+        tvRealtimeText.setMinLines(2);
+        layout.addView(tvRealtimeText);
+
+        voiceInputDialog = builder.setView(layout)
+                .setCancelable(false)
+                .setNegativeButton("取消", (dialog, which) -> stopVoiceService())
+                .create();
+
+        voiceInputDialog.show();
+    }
+
+    @Override
+    public void onResult(String hypothesis) {
+        try {
+            JSONObject json = new JSONObject(hypothesis);
+            String text = json.optString("text", "");
+            android.util.Log.d("VoskSpeech", "Result: " + hypothesis);
+            if (!text.isEmpty()) {
+                runOnUiThread(() -> {
+                    if (tvRealtimeText != null) tvRealtimeText.setText(text);
+                });
+                // 稍微延迟一点关闭，让用户看一眼结果
+                new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                    if (voiceInputDialog != null) voiceInputDialog.dismiss();
+                    processVoiceInput(text);
+                }, 500);
+            } else {
+                stopVoiceService();
+            }
+        } catch (JSONException e) {
+            e.printStackTrace();
+            stopVoiceService();
+        }
+    }
+
+    @Override
+    public void onFinalResult(String hypothesis) {
+        // onResult 已经处理了逻辑
+    }
+
+    @Override
+    public void onPartialResult(String hypothesis) {
+        try {
+            JSONObject json = new JSONObject(hypothesis);
+            String partial = json.optString("partial", "");
+            android.util.Log.d("VoskSpeech", "Partial: " + hypothesis);
+            runOnUiThread(() -> {
+                if (tvRealtimeText != null) {
+                    if (!partial.isEmpty()) {
+                        tvRealtimeText.setText(partial);
+                    } else {
+                        tvRealtimeText.setText("正在倾听...");
+                    }
+                }
+            });
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public void onError(Exception exception) {
+        runOnUiThread(() -> {
+            Toast.makeText(this, "识别错误: " + exception.getMessage(), Toast.LENGTH_SHORT).show();
+            stopVoiceService();
+        });
+    }
+
+    @Override
+    public void onTimeout() {
+        runOnUiThread(this::stopVoiceService);
+    }
+
+    private void stopVoiceService() {
+        if (speechService != null) {
+            speechService.stop();
+            speechService = null;
+        }
+        if (voiceInputDialog != null && voiceInputDialog.isShowing()) {
+            voiceInputDialog.dismiss();
+        }
+    }
+
+    private void processVoiceInput(String text) {
+        if (voiceTargetStudent == null) return;
+
+        // 清洗识别结果 (Vosk 中文结果常带空格)
+        String cleanText = text.replace(" ", "").trim();
+        android.util.Log.d("VoskSpeech", "识别到文字: [" + cleanText + "]");
+
+        if (cleanText.isEmpty() || cleanText.equals("[unk]")) {
+            Toast.makeText(this, "未听清，请尝试简洁说话", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        List<String> categories = RuleManager.getCategories();
+        Rule bestMatch = null;
+        int maxSimilarity = 0;
+
+        for (String cat : categories) {
+            for (Rule rule : RuleManager.getRulesByCategory(cat)) {
+                // 修改此处：支持识别 A, +, - 字符的匹配
+                String cleanRuleDesc = rule.description.replaceAll("[^\\u4e00-\\u9fa5A\\+\\-]", "");
+
+                // 核心算法：检查识别出的“短词”是否在“规则描述”中，或者反之
+                if (cleanText.contains(cleanRuleDesc) || cleanRuleDesc.contains(cleanText)) {
+                    // 取描述长度作为权重，防止“优秀”误杀“作业优秀”
+                    if (cleanRuleDesc.length() > maxSimilarity) {
+                        bestMatch = rule;
+                        maxSimilarity = cleanRuleDesc.length();
+                    }
+                }
+            }
+        }
+
+        if (bestMatch != null) {
+            applyRule(voiceTargetStudent, bestMatch);
+        } else {
+            Toast.makeText(this, "识别为 '" + cleanText + "'，但未找到匹配细则", Toast.LENGTH_LONG).show();
+        }
+        voiceTargetStudent = null;
+    }
+
     private void setupRecyclerView() {
         adapter = new StudentAdapter();
         adapter.setOnStudentClickListener(new StudentAdapter.OnStudentClickListener() {
@@ -146,6 +424,11 @@ public class MainActivity extends AppCompatActivity {
                 Intent intent = new Intent(MainActivity.this, StudentDetailActivity.class);
                 intent.putExtra("student_id", student.id);
                 startActivity(intent);
+            }
+
+            @Override
+            public void onStudentDoubleClick(Student student) {
+                startVoiceInput(student);
             }
         });
         binding.rvStudents.setLayoutManager(new LinearLayoutManager(this));
@@ -163,9 +446,15 @@ public class MainActivity extends AppCompatActivity {
 
             String toastText = "";
             switch (sortMode) {
-                case 0: toastText = "按学号排序"; break;
-                case 1: toastText = "按本周总分排序"; break;
-                case 2: toastText = "按累积总分排序"; break;
+                case 0:
+                    toastText = "按学号排序";
+                    break;
+                case 1:
+                    toastText = "按本周总分排序";
+                    break;
+                case 2:
+                    toastText = "按累积总分排序";
+                    break;
             }
             Toast.makeText(this, toastText, Toast.LENGTH_SHORT).show();
         });
@@ -193,17 +482,29 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateSortButtonText() {
         switch (sortMode) {
-            case 0: binding.btnRank.setText("按本周总分排序"); break;
-            case 1: binding.btnRank.setText("按累积总分排序"); break;
-            case 2: binding.btnRank.setText("按学号排序"); break;
+            case 0:
+                binding.btnRank.setText("按本周总分排序");
+                break;
+            case 1:
+                binding.btnRank.setText("按累积总分排序");
+                break;
+            case 2:
+                binding.btnRank.setText("按学号排序");
+                break;
         }
     }
 
     private void refreshList() {
         switch (sortMode) {
-            case 0: adapter.setStudents(db.studentDao().getAllStudents()); break;
-            case 1: adapter.setStudents(db.studentDao().getStudentsRankedByWeekly()); break;
-            case 2: adapter.setStudents(db.studentDao().getStudentsRankedByCumulative()); break;
+            case 0:
+                adapter.setStudents(db.studentDao().getAllStudents());
+                break;
+            case 1:
+                adapter.setStudents(db.studentDao().getStudentsRankedByWeekly());
+                break;
+            case 2:
+                adapter.setStudents(db.studentDao().getStudentsRankedByCumulative());
+                break;
         }
     }
 
@@ -320,8 +621,16 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         LocalBroadcastManager.getInstance(this).unregisterReceiver(dataChangeReceiver);
+        if (speechService != null) {
+            speechService.stop();
+            speechService = null;
+        }
         // 通常不在这里停止服务，除非你想退出 App 时也停止同步
         // Stop the service only if we are specifically closing the app
         // For teacher's convenience, let's keep it running unless manually stopped or app explicitly destroyed
+    }
+
+    private void showSpeechServiceUnavailableDialog() {
+        // 由于使用了 Vosk 离线识别，不再需要此对话框，已通过 initVosk 的回调处理
     }
 }
