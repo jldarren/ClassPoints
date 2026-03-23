@@ -104,6 +104,43 @@ public class SyncServer extends NanoHTTPD {
             } catch (Exception e) {
                 response = newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json", "{\"error\":\"" + e.getMessage() + "\"}");
             }
+        } else if (uri.equals("/api/batch_apply_rule") && (session.getMethod() == Method.POST || session.getMethod() == Method.PUT)) {
+            try {
+                Map<String, String> files = new HashMap<>();
+                session.parseBody(files);
+                String postData = files.get("postData");
+                if (postData == null) postData = session.getParms().get("postData");
+
+                if (postData == null) throw new Exception("Missing postData");
+
+                Map<String, Object> params = gson.fromJson(postData, Map.class);
+                List<Double> studentIdsRaw = (List<Double>) params.get("studentIds");
+                String category = (String) params.get("category");
+                String description = (String) params.get("description");
+                Object scoreObj = params.get("score");
+                double score = (scoreObj instanceof Number) ? ((Number) scoreObj).doubleValue() : Double.parseDouble(scoreObj.toString());
+
+                for (Double idD : studentIdsRaw) {
+                    int studentId = idD.intValue();
+                    Student student = db.studentDao().getStudentById(studentId);
+                    if (student != null) {
+                        student.currentWeeklyPoints += score;
+                        db.studentDao().update(student);
+
+                        top.ligoudaner.classpoints.model.PointRecord record = new top.ligoudaner.classpoints.model.PointRecord(
+                                student.id, category, description, score,
+                                System.currentTimeMillis(), DateUtils.getWeekIdentifier()
+                        );
+                        db.pointRecordDao().insert(record);
+                    }
+                }
+
+                if (listener != null) listener.onDataChanged();
+                response = newFixedLengthResponse(Response.Status.OK, "application/json", "{\"status\":\"success\"}");
+
+            } catch (Exception e) {
+                response = newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json", "{\"error\":\"" + e.getMessage() + "\"}");
+            }
         } else if (uri.equals("/api/student_details")) {
             String idStr = session.getParms().get("id");
             if (idStr != null) {

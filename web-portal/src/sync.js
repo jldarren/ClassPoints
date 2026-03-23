@@ -67,6 +67,29 @@ const ClassPointsSync = {
             console.error("History fetch failed:", error);
             return [];
         }
+    },
+
+    /**
+     * 批量应用评分
+     */
+    async batchApplyRule(deviceIp, studentIds, rule) {
+        try {
+            const url = deviceIp.startsWith('http') ? deviceIp : `http://${deviceIp}`;
+            const response = await fetch(`${url}/api/batch_apply_rule`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `postData=${encodeURIComponent(JSON.stringify({
+                    studentIds: studentIds,
+                    category: rule.category,
+                    description: rule.description,
+                    score: rule.score
+                }))}`
+            });
+            if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+            return await response.json();
+        } catch (error) {
+            throw new Error(`批量申请评分失败: ${error.message}`);
+        }
     }
 };
 

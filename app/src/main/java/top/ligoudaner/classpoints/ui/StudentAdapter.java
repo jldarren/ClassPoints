@@ -7,7 +7,9 @@ import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import top.ligoudaner.classpoints.databinding.ItemStudentBinding;
 import top.ligoudaner.classpoints.model.Student;
@@ -15,12 +17,14 @@ import top.ligoudaner.classpoints.model.Student;
 public class StudentAdapter extends RecyclerView.Adapter<StudentAdapter.ViewHolder> {
 
     private List<Student> students = new ArrayList<>();
+    private Set<Integer> selectedStudentIds = new HashSet<>();
     private OnStudentClickListener listener;
 
     public interface OnStudentClickListener {
         void onAddPointClick(Student student);
         void onStudentLongClick(Student student);
         void onStudentDoubleClick(Student student);
+        void onSelectionChanged(int count);
     }
 
     public void setOnStudentClickListener(OnStudentClickListener listener) {
@@ -29,6 +33,15 @@ public class StudentAdapter extends RecyclerView.Adapter<StudentAdapter.ViewHold
 
     public void setStudents(List<Student> students) {
         this.students = students;
+        notifyDataSetChanged();
+    }
+
+    public List<Integer> getSelectedIds() {
+        return new ArrayList<>(selectedStudentIds);
+    }
+
+    public void clearSelection() {
+        selectedStudentIds.clear();
         notifyDataSetChanged();
     }
 
@@ -44,6 +57,18 @@ public class StudentAdapter extends RecyclerView.Adapter<StudentAdapter.ViewHold
         Student student = students.get(position);
         holder.binding.tvStudentId.setText(String.valueOf(student.id));
         holder.binding.tvStudentName.setText(student.name);
+
+        // 多选逻辑
+        holder.binding.cbSelect.setOnCheckedChangeListener(null);
+        holder.binding.cbSelect.setChecked(selectedStudentIds.contains(student.id));
+        holder.binding.cbSelect.setOnCheckedChangeListener((v, isChecked) -> {
+            if (isChecked) {
+                selectedStudentIds.add(student.id);
+            } else {
+                selectedStudentIds.remove(student.id);
+            }
+            if (listener != null) listener.onSelectionChanged(selectedStudentIds.size());
+        });
 
         double weeklyTotal = student.currentWeeklyPoints;
         double cumulativeTotal = student.totalPoints + student.currentWeeklyPoints;

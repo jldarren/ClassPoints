@@ -15,6 +15,7 @@
         .status-success { background: #c8e6c9; color: #2e7d32; }
         .status-error { background: #ffcdd2; color: #c62828; }
         .controls { margin-bottom: 25px; display: flex; gap: 10px; align-items: center; justify-content: center; background: #f0f0f0; padding: 15px; border-radius: 8px; }
+        #batchBtn { background: #fb8c00; display: none; }
         button { padding: 10px 18px; background: #6200ee; color: white; border: none; border-radius: 6px; cursor: pointer; transition: 0.2s; font-weight: bold; }
         button:hover { background: #3700b3; }
         button:disabled { background: #bdbdbd; cursor: not-allowed; }
@@ -26,7 +27,7 @@
         th:hover { background-color: #3700b3; }
         tr:hover { background-color: #f1f1f1; }
 
-        .modal { display: none; position: fixed, z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); overflow-y: auto; }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); overflow-y: auto; }
         .modal-content { background-color: white; margin: 5% auto; padding: 25px; border-radius: 12px; width: 80%; max-width: 800px; position: relative; }
         .close { position: absolute; right: 20px; top: 15px; font-size: 28px; font-weight: bold; cursor: pointer; }
 
@@ -53,6 +54,7 @@
             <label for="deviceIp">Android 设备 IP:</label>
             <input type="text" id="deviceIp" placeholder="例如: 192.168.124.13">
             <button id="syncBtn">手动同步</button>
+            <button id="batchBtn">批量评分 (<span id="selectedCount">0</span>)</button>
             <button id="exportBtn" style="background: #018786;">导出 CSV</button>
         </div>
 
@@ -67,10 +69,11 @@
             <table id="studentTable">
                 <thead>
                     <tr>
-                        <th onclick="sortTable(0)">学号 ↑↓</th>
-                        <th onclick="sortTable(1)">姓名</th>
-                        <th onclick="sortTable(2)">本周总分 ↑↓</th>
-                        <th onclick="sortTable(3)">累积总分 ↑↓</th>
+                        <th style="width: 40px;"><input type="checkbox" id="selectAll"></th>
+                        <th onclick="sortTable(1)">学号 ↑↓</th>
+                        <th onclick="sortTable(2)">姓名</th>
+                        <th onclick="sortTable(3)">本周总分 ↑↓</th>
+                        <th onclick="sortTable(4)">累积总分 ↑↓</th>
                         <th>操作</th>
                     </tr>
                 </thead>
@@ -117,11 +120,14 @@
         let currentStudents = [];
         let allRules = {};
         let currentStudentId = null;
+        let selectedStudentIds = new Set();
+        let isBatchMode = false;
         let pieChart = null;
         let lineChart = null;
 
         const ipInput = document.getElementById('deviceIp');
         const syncBtn = document.getElementById('syncBtn');
+        const batchBtn = document.getElementById('batchBtn');
         const exportBtn = document.getElementById('exportBtn');
         const statusDiv = document.getElementById('status');
 
@@ -144,6 +150,34 @@
 
         syncBtn.addEventListener('click', () => performSync());
         exportBtn.addEventListener('click', () => exportToCSV());
+
+        batchBtn.addEventListener('click', () => {
+            if (selectedStudentIds.size === 0) return;
+            isBatchMode = true;
+            document.getElementById('modalStudentTitle').textContent = `为选中的 ${selectedStudentIds.size} 名学生批量评分`;
+            document.getElementById('detailModal').style.display = 'block';
+            renderRuleCategories();
+            showTab('score');
+            // 隐藏图表标签
+            document.getElementById('tabHeadChart').style.display = 'none';
+        });
+
+        document.getElementById('selectAll').addEventListener('change', (e) => {
+            const checked = e.target.checked;
+            document.querySelectorAll('.student-checkbox').forEach(cb => {
+                cb.checked = checked;
+                const id = parseInt(cb.dataset.id);
+                if (checked) selectedStudentIds.add(id);
+                else selectedStudentIds.delete(id);
+            });
+            updateBatchButton();
+        });
+
+        function updateBatchButton() {
+            const count = selectedStudentIds.size;
+            document.getElementById('selectedCount').textContent = count;
+            batchBtn.style.display = count > 0 ? 'inline-block' : 'none';
+        }
 
         // 检测用户活动自动触发同步
         let lastSyncTime = 0;
@@ -198,7 +232,15 @@
                 if (data && data.students) {
                     currentStudents = data.students;
                     localStorage.setItem('cp_cached_students', JSON.stringify(currentStudents));
+
+                    // 同步后清理不存在的选中ID
+                    const currentIds = new Set(currentStudents.map(s => s.id));
+                    selectedStudentIds.forEach(id => {
+                        if (!currentIds.has(id)) selectedStudentIds.delete(id);
+                    });
+
                     updateUI();
+                    updateBatchButton();
 
                     allRules = await ClassPointsSync.getRules(ipPort);
                     localStorage.setItem('cp_cached_rules', JSON.stringify(allRules));
@@ -331,7 +373,9 @@
             tbody.innerHTML = '';
             currentStudents.forEach(s => {
                 const tr = document.createElement('tr');
+                const isChecked = selectedStudentIds.has(s.id) ? 'checked' : '';
                 tr.innerHTML = `
+                    <td><input type="checkbox" class="student-checkbox" data-id="${s.id}" ${isChecked}></td>
                     <td>${s.id}</td>
                     <td>${s.name}</td>
                     <td>${s.currentWeeklyPoints}</td>
@@ -342,9 +386,19 @@
                 `;
                 tbody.appendChild(tr);
             });
+
+            // 绑定复选框事件
+            document.querySelectorAll('.student-checkbox').forEach(cb => {
+                cb.addEventListener('change', (e) => {
+                    const id = parseInt(e.target.dataset.id);
+                    if (e.target.checked) selectedStudentIds.add(id);
+                    else selectedStudentIds.delete(id);
+                    updateBatchButton();
+                });
+            });
         }
 
-        let sortDirs = [1, 1, 1, 1];
+        let sortDirs = [1, 1, 1, 1, 1];
         function sortTable(colIdx) {
             sortDirs[colIdx] *= -1;
             const dir = sortDirs[colIdx];
@@ -365,10 +419,12 @@
         }
 
         function openDetail(studentId) {
+            isBatchMode = false;
             currentStudentId = studentId;
             const student = currentStudents.find(s => s.id === studentId);
             document.getElementById('modalStudentTitle').textContent = `${student.name} (学号: ${student.id}) 的详细信息`;
             document.getElementById('detailModal').style.display = 'block';
+            document.getElementById('tabHeadChart').style.display = 'block';
 
             renderRuleCategories();
             showTab('score');
@@ -409,14 +465,24 @@
         }
 
         async function applyRule(rule) {
-            if (!confirm(`确定要为学生评价: ${rule.description} (${rule.score}分) 吗?`)) return;
+            const count = isBatchMode ? selectedStudentIds.size : 1;
+            if (!confirm(`确定要为 ${count} 名学生评价: ${rule.description} (${rule.score}分) 吗?`)) return;
 
             const ip = ipInput.value.trim();
             const ipPort = ip.includes(':') ? ip : ip + ':8080';
             try {
-                await ClassPointsSync.applyRule(ipPort, currentStudentId, rule);
+                if (isBatchMode) {
+                    await ClassPointsSync.batchApplyRule(ipPort, Array.from(selectedStudentIds), rule);
+                    selectedStudentIds.clear();
+                    document.getElementById('selectAll').checked = false;
+                    updateBatchButton();
+                } else {
+                    await ClassPointsSync.applyRule(ipPort, currentStudentId, rule);
+                }
+
                 // 评分成功后，立即同步一次数据以更新本地显示
                 await performSync(true);
+                closeModal();
                 alert('评分成功！');
             } catch (err) {
                 alert('评分失败: ' + err.message);

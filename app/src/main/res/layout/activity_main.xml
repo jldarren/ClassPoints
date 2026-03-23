@@ -51,6 +51,13 @@
             android:layout_weight="1"
             android:text="导出CSV" />
 
+        <Button
+            android:id="@+id/btn_batch_points"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="批量评分"
+            android:visibility="gone" />
 
     </LinearLayout>
 

@@ -433,6 +433,16 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
             public void onStudentDoubleClick(Student student) {
                 startVoiceInput(student);
             }
+
+            @Override
+            public void onSelectionChanged(int count) {
+                if (count > 0) {
+                    binding.btnBatchPoints.setVisibility(android.view.View.VISIBLE);
+                    binding.btnBatchPoints.setText("批量评分(" + count + ")");
+                } else {
+                    binding.btnBatchPoints.setVisibility(android.view.View.GONE);
+                }
+            }
         });
         binding.rvStudents.setLayoutManager(new LinearLayoutManager(this));
         binding.rvStudents.setAdapter(adapter);
@@ -462,6 +472,57 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
             Toast.makeText(this, toastText, Toast.LENGTH_SHORT).show();
         });
         binding.btnExport.setOnClickListener(v -> exportCSV());
+        binding.btnBatchPoints.setOnClickListener(v -> {
+            List<Integer> selectedIds = adapter.getSelectedIds();
+            if (!selectedIds.isEmpty()) {
+                showBatchCategoryDialog(selectedIds);
+            }
+        });
+    }
+
+    private void showBatchCategoryDialog(List<Integer> studentIds) {
+        List<String> categories = RuleManager.getCategories();
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("批量选择评分分类 (" + studentIds.size() + "人)");
+        builder.setItems(categories.toArray(new String[0]), (dialog, which) -> {
+            showBatchRuleDialog(studentIds, categories.get(which));
+        });
+        builder.show();
+    }
+
+    private void showBatchRuleDialog(List<Integer> studentIds, String category) {
+        List<Rule> rules = RuleManager.getRulesByCategory(category);
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("选择具体细则");
+        builder.setItems(rules.stream().map(Rule::toString).toArray(String[]::new), (dialog, which) -> {
+            Rule selectedRule = rules.get(which);
+            applyRuleToMultiple(studentIds, selectedRule);
+        });
+        builder.show();
+    }
+
+    private void applyRuleToMultiple(List<Integer> studentIds, Rule rule) {
+        for (Integer id : studentIds) {
+            Student student = db.studentDao().getStudentById(id);
+            if (student != null) {
+                student.currentWeeklyPoints += rule.score;
+                db.studentDao().update(student);
+
+                PointRecord record = new PointRecord(
+                        student.id,
+                        rule.category,
+                        rule.description,
+                        rule.score,
+                        System.currentTimeMillis(),
+                        DateUtils.getWeekIdentifier()
+                );
+                db.pointRecordDao().insert(record);
+            }
+        }
+        adapter.clearSelection();
+        binding.btnBatchPoints.setVisibility(android.view.View.GONE);
+        refreshList();
+        Toast.makeText(this, "已为 " + studentIds.size() + " 名学生应用了: " + rule.description, Toast.LENGTH_SHORT).show();
     }
 
     private String getLocalIpAddress() {
