@@ -7,4 +7,9 @@
     </style>
 
     <style name="Theme.ClassPoints" parent="Base.Theme.ClassPoints" />
+
+    <style name="Theme.ClassPoints.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+    </style>
 </resources>
