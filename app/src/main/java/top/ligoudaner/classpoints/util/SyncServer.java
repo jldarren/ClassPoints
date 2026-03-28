@@ -84,6 +84,7 @@ public class SyncServer extends NanoHTTPD {
                 Student student = db.studentDao().getStudentById(studentId);
                 if (student != null) {
                     student.currentWeeklyPoints += score;
+                    student.totalPoints += score; // 同步更新累积总分
                     db.studentDao().update(student);
 
                     top.ligoudaner.classpoints.model.PointRecord record = new top.ligoudaner.classpoints.model.PointRecord(
@@ -125,6 +126,7 @@ public class SyncServer extends NanoHTTPD {
                     Student student = db.studentDao().getStudentById(studentId);
                     if (student != null) {
                         student.currentWeeklyPoints += score;
+                        student.totalPoints += score; // 同步更新累积总分
                         db.studentDao().update(student);
 
                         top.ligoudaner.classpoints.model.PointRecord record = new top.ligoudaner.classpoints.model.PointRecord(

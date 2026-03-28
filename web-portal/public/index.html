@@ -70,10 +70,10 @@
                 <thead>
                     <tr>
                         <th style="width: 40px;"><input type="checkbox" id="selectAll"></th>
-                        <th onclick="sortTable(1)">学号 ↑↓</th>
-                        <th onclick="sortTable(2)">姓名</th>
-                        <th onclick="sortTable(3)">本周总分 ↑↓</th>
-                        <th onclick="sortTable(4)">累积总分 ↑↓</th>
+                        <th onclick="sortTable(0)">学号 ↑↓</th>
+                        <th onclick="sortTable(1)">姓名</th>
+                        <th onclick="sortTable(2)">本周总分 ↑↓</th>
+                        <th onclick="sortTable(3)">累积总分 ↑↓</th>
                         <th>操作</th>
                     </tr>
                 </thead>
@@ -181,10 +181,13 @@
 
         // 检测用户活动自动触发同步
         let lastSyncTime = 0;
-        const SYNC_COOLDOWN = 5000; // 冷却时间缩短为 5 秒，更灵敏
+        const SYNC_COOLDOWN = 5000; // 冷却时间 5 秒
         let debounceTimer = null;
 
-        function handleUserActivity() {
+        function handleUserActivity(event) {
+            // 原逻辑：避让按钮。新要求：点击任何按钮/排序都触发同步。
+            // 因此移除原先的 return 拦截逻辑，让所有有效点击都能进入防抖流程。
+
             const now = Date.now();
             if (now - lastSyncTime < SYNC_COOLDOWN) return;
 
@@ -194,17 +197,16 @@
                 if (nowAfterDebounce - lastSyncTime >= SYNC_COOLDOWN) {
                     const inputVal = ipInput.value.trim();
                     if (inputVal && document.visibilityState === 'visible') {
-                        console.log("检测到活跃，自动同步...");
+                        console.log("检测到点击活跃，自动同步...");
                         performSync(true);
-                        lastSyncTime = nowAfterDebounce;
                     }
                 }
             }, 350);
         }
 
-        // 绑定在 window 上更可靠，涵盖全屏活动
-        window.addEventListener('mousemove', handleUserActivity);
-        window.addEventListener('click', handleUserActivity);
+        // 绑定点击和触摸事件进行自动同步
+        window.addEventListener('click', handleUserActivity, true); // 使用捕获模式确保在按钮自身的逻辑执行前或同时触发同步
+        window.addEventListener('touchstart', handleUserActivity, { passive: true, capture: true });
         window.addEventListener('focus', () => performSync(true));
 
         // 取消自动同步
@@ -239,7 +241,7 @@
                         if (!currentIds.has(id)) selectedStudentIds.delete(id);
                     });
 
-                    updateUI();
+                    updateUI(); // updateUI now calls applySorting internally
                     updateBatchButton();
 
                     allRules = await ClassPointsSync.getRules(ipPort);
@@ -368,18 +370,44 @@
             }
         }
 
+        let sortDirs = [1, 1, 1, 1];
+        function sortTable(colIdx) {
+            sortDirs[colIdx] *= -1;
+            const dir = sortDirs[colIdx];
+
+            currentStudents.sort((a, b) => {
+                let valA, valB;
+                switch(colIdx) {
+                    case 0: valA = a.id; valB = b.id; break;
+                    case 1: valA = a.name; valB = b.name; break;
+                    case 2: valA = a.currentWeeklyPoints; valB = b.currentWeeklyPoints; break;
+                    case 3:
+                        valA = (a.totalPoints || 0) + (a.currentWeeklyPoints || 0);
+                        valB = (b.totalPoints || 0) + (b.currentWeeklyPoints || 0);
+                        break;
+                }
+                if (valA < valB) return -1 * dir;
+                if (valA > valB) return 1 * dir;
+                return 0;
+            });
+            updateUI();
+        }
+
         function updateUI() {
             const tbody = document.querySelector('#studentTable tbody');
             tbody.innerHTML = '';
             currentStudents.forEach(s => {
                 const tr = document.createElement('tr');
                 const isChecked = selectedStudentIds.has(s.id) ? 'checked' : '';
+                // 计算显示用的累积总分：App 存储的历史累积分 (s.totalPoints) + 本周现有积分 (s.currentWeeklyPoints)
+                const displayTotalPoints = (s.totalPoints || 0) + (s.currentWeeklyPoints || 0);
+
                 tr.innerHTML = `
                     <td><input type="checkbox" class="student-checkbox" data-id="${s.id}" ${isChecked}></td>
                     <td>${s.id}</td>
                     <td>${s.name}</td>
                     <td>${s.currentWeeklyPoints}</td>
-                    <td>${s.totalPoints}</td>
+                    <td>${displayTotalPoints}</td>
                     <td>
                         <button onclick="openDetail(${s.id})">评分/详情</button>
                     </td>
@@ -396,26 +424,6 @@
                     updateBatchButton();
                 });
             });
-        }
-
-        let sortDirs = [1, 1, 1, 1, 1];
-        function sortTable(colIdx) {
-            sortDirs[colIdx] *= -1;
-            const dir = sortDirs[colIdx];
-
-            currentStudents.sort((a, b) => {
-                let valA, valB;
-                switch(colIdx) {
-                    case 0: valA = a.id; valB = b.id; break;
-                    case 1: valA = a.name; valB = b.name; break;
-                    case 2: valA = a.currentWeeklyPoints; valB = b.currentWeeklyPoints; break;
-                    case 3: valA = a.totalPoints; valB = b.totalPoints; break;
-                }
-                if (valA < valB) return -1 * dir;
-                if (valA > valB) return 1 * dir;
-                return 0;
-            });
-            updateUI();
         }
 
         function openDetail(studentId) {
